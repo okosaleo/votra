@@ -1,0 +1,217 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid()) @map("_id")
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  role          String             @default("user")
+  premium       Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  // Relations
+  createdRooms    DecisionRoom[] @relation("RoomCreator")
+  votes           Vote[]
+  comments        Comment[]
+  voteJustifications VoteJustification[]
+  sessions      Session[]
+  accounts      Account[]
+  @@index([id]) 
+  @@map("users")
+}
+
+model Session {
+  id              String @id @default(cuid())
+  userId          String
+  token           String
+  expiresAt       DateTime
+  ipAddress       String
+  impersonatedBy  String?
+  userAgent       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id                      String  @id @default(cuid())
+  userId                  String  
+  accountId               String
+  providerId              String
+  accessToken             String?
+  refreshToken            String?
+  accessTokenExpiresAt    DateTime?
+  refreshTokenExpiresAt   DateTime?
+  scope                   String?
+  password                String?
+  idToken                 String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+
+model Guest {
+  id          String   @id @default(cuid())
+  sessionId   String   @unique // browser session or fingerprint
+  ipAddress   String?  // for additional tracking
+  userAgent   String?  // browser info for fingerprinting
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  votes           Vote[]
+  comments        Comment[]
+  voteJustifications VoteJustification[]
+  
+  @@map("guests")
+}
+
+// Decision Room model
+model DecisionRoom {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  slug        String   @unique // for shareable URLs
+  
+  // Voting configuration
+  votingDeadline DateTime
+  isActive      Boolean  @default(true)
+  maxOptions    Int      @default(5) @db.SmallInt
+  minOptions    Int      @default(2) @db.SmallInt
+  
+  // Settings
+  allowGuestVoting     Boolean @default(true)
+  allowDiscussion      Boolean @default(true)
+  allowVoteJustification Boolean @default(true)
+  showLiveResults      Boolean @default(true) // show results before deadline
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  creator   User   @relation("RoomCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  creatorId String
+  
+  options         VotingOption[]
+  votes           Vote[]
+  comments        Comment[]
+  voteJustifications VoteJustification[]
+  
+  @@map("decision_rooms")
+}
+
+// Voting options for each decision room
+model VotingOption {
+  id          String @id @default(cuid())
+  title       String
+  description String?
+  order       Int    @db.SmallInt // display order
+  
+  createdAt DateTime @default(now())
+  
+  // Relations
+  room   DecisionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  roomId String
+  
+  votes           Vote[]
+  voteJustifications VoteJustification[]
+  
+  @@unique([roomId, order])
+  @@map("voting_options")
+}
+
+// Vote model - tracks individual votes
+model Vote {
+  id        String   @id @default(cuid())
+  
+  createdAt DateTime @default(now())
+  
+  // Relations - either user or guest (exclusive)
+  user      User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String?
+  
+  guest     Guest?  @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  guestId   String?
+  
+  room      DecisionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  roomId    String
+  
+  option    VotingOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  optionId  String
+  
+  // Ensure one vote per user/guest per room
+  @@unique([userId, roomId])
+  @@unique([guestId, roomId])
+  @@map("votes")
+}
+
+// Bonus Feature: Discussion Thread
+model Comment {
+  id      String @id @default(cuid())
+  content String
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations - either user or guest (exclusive)
+  user      User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String?
+  
+  guest     Guest?  @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  guestId   String?
+  
+  room      DecisionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  roomId    String
+  
+  // Nested comments (replies)
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  parentId  String?
+  replies   Comment[] @relation("CommentReplies")
+  
+  @@map("comments")
+}
+
+// Bonus Feature: Vote Justification
+model VoteJustification {
+  id           String @id @default(cuid())
+  justification String
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations - either user or guest (exclusive)
+  user      User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String?
+  
+  guest     Guest?  @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  guestId   String?
+  
+  room      DecisionRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  roomId    String
+  
+  option    VotingOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  optionId  String
+  
+  // Ensure one justification per user/guest per room
+  @@unique([userId, roomId])
+  @@unique([guestId, roomId])
+  @@map("vote_justifications")
+}
+
